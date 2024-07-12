@@ -1,0 +1,715 @@
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/debian-linux-lib.pl naveed_module/debian-linux-lib.pl
+--- webmin_1.820/usr/share/webmin/net/debian-linux-lib.pl	2016-10-02 23:34:57.000000000 -0400
++++ naveed_module/debian-linux-lib.pl	2016-12-12 06:29:02.000000000 -0500
+@@ -49,10 +49,59 @@
+ 			}
+ 		foreach $option (@$options) {
+ 			my ($param, $value) = @$option;
++
++
++####################################################SSID
++
++
++                        if ($param eq 'wpa-ssid')
++                        {
++                                $cfg->{'ssid'} = $value;
++                        }
++
++                        if ($param eq 'wpa-psk')
++                        {
++
++                                $cfg->{'wpa_passphrase'} = $value;
++
++                        }
++
++########################################################
++
+ 			if ($param eq 'noauto') {
+ 				$cfg->{'up'} = 0;
+ 				}
+-			elsif($param eq 'up') { 
++
++#			elsif($param eq 'up') { 
++
++
++
++                        elsif($param eq 'up')   ### to check for promisc line in interfaces file 
++                                {
++
++                               if ( ($value =~ m/(promisc)/ ))   # if line has ifconfig eth0/wlan0 promsic
++                               {
++
++                                       my ($ifcon,$interface,$promisc_value) = split (/ /,$value); ## ifconfig eth0 promic or -promisc 
++
++                                       $value=$promisc_value;
++                                       push(@iface_options, [$ifcon, $value]);
++
++                                        if ($value eq "promisc")
++                                        {
++                                         $cfg->{'promisc'} = 1;
++                                        }
++                                        else
++                                        {
++                                         $cfg->{'promisc'} = 0;
++
++                                        }
++
++
++                               }
++
++###########################################################end promisc                         
++
+ 				$cfg->{"partner"} =
+ 				  &get_teaming_partner($cfg->{'name'}, $value);
+ 				%options = &get_module_defs($name);
+@@ -163,6 +212,15 @@
+ return @rv;
+ }
+ 
++#############how web min handle parameters .. for promisc 
++
++# (name, addrfam, method, options) with
++#    name          the interface name (e.g. eth0)
++#    addrfam       the address family (e.g. inet, inet6)
++#    method        the address activation method (e.g. static, dhcp, loopback)
++#    options       is a list of (param, value) pairs
++#####################################
++
+ # save_interface(&details)
+ # Create or update a boot-time interface
+ sub save_interface
+@@ -202,6 +260,46 @@
+ else {
+ 	$method = 'manual';
+ 	}
++
++###################saving in file 
++if ($cfg->{'promisc'})
++        {
++
++
++        push(@options, ["up","ifconfig $name promisc"]);                #      Saving in file 
++
++
++        }
++
++else     #replaced promisc with ifconfig due to wrong line in interfaces files
++{
++
++        push(@options, ["up","ifconfig $name -promisc"]);                #      Saving in file 
++
++
++##disable promisc
++}
++
++########################SSID and WPA passphrase ###
++
++
++
++if ($name =~ /^(wlan)/)
++{
++
++
++if ($cfg->{'ssid'} && $cfg->{'wpa_passphrase'})
++        {
++
++        push(@options, ['wpa-ssid', $cfg->{'ssid'}]);                #      Saving in file 
++        push(@options, ['wpa-psk', $cfg->{'wpa_passphrase'}]);
++
++
++        }
++
++}
++#############################################for ssid and passphrase
++
+ my @autos = get_auto_defs();
+ my $amode = $gconfig{'os_version'} > 3 || scalar(@autos);
+ if (!$cfg->{'up'} && !$amode) { push(@options, ['noauto', '']); }
+@@ -814,9 +912,33 @@
+ 				next;
+ 				}
+ 			my ($param, $value);
+-			if ( ($param, $value) = ($line =~ /^\s*(\S+)\s+(.*)\s*$/) ) {
++		
++#	if ( ($param, $value) = ($line =~ /^\s*(\S+)\s+(.*)\s*$/) ) {
++
++       #######################################SSID/WPA###############
++                ##############################
++
++                        if ( ($line =~ m/(wpa-ssid)/ )) {  ##if wpa-psk matched, get it
++                                my ($p,$v) = split (/ /,$line);
++                                push(@iface_options, [$p, $v]);
++
++                        }
++
++
++                        if ( ($line =~ m/(wpa-psk)/ )) {  ##if wpa-psk matched, get it
++                                my ($p1,$v1) = split (/ /,$line);
++                                push(@iface_options, [$p1, $v1]);
++
++                        }
++
++#######################################SSID/WPA###############
++
++                        if ( ($param, $value) = ($line =~ /^\s*(\S+)\s+(.*)\s*$/) ) {   #here is the issue for ifconfig eth0/wlan0 promsic
++
++
+ 				push(@iface_options, [$param, $value]);
+ 				}
++			
+ 			elsif ( ($param) = ($line =~ /^\s*(\S+)\s*$/) ) {
+ 				push(@iface_options, [$param, '']);
+ 				}
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/edit_aifc.cgi naveed_module/edit_aifc.cgi
+--- webmin_1.820/usr/share/webmin/net/edit_aifc.cgi	2016-10-02 23:51:55.000000000 -0400
++++ naveed_module/edit_aifc.cgi	2016-12-31 05:29:10.000000000 -0500
+@@ -139,6 +139,28 @@
+ 	}
+ print &ui_table_row($text{'ifcs_status'}, $upfield);
+ 
++##promisc# Current status
++
++
++if ($a->{'fullname'} =~ /^(lo)/)  #dont show promisc option for lo interface
++{
++
++}
++else
++{
++        $promfield = &ui_radio("promisc", $in{'new'} || $a->{'promisc'} ? 1 : 0,
++                        [ [ 1, "Promisc ON" ], [ 0, "Promisc OFF" ] ]);
++#       }
++print &ui_table_row("Promisc Mode", $promfield);
++
++}
++
++
++
++
++
++
++
+ # Hardware address, if non-virtual
+ if ((!$a && $in{'virtual'} eq "") ||
+     ($a && $a->{'virtual'} eq "" && &iface_hardware($a->{'name'}))) {
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/edit_bifc.cgi naveed_module/edit_bifc.cgi
+--- webmin_1.820/usr/share/webmin/net/edit_bifc.cgi	2016-10-02 23:51:55.000000000 -0400
++++ naveed_module/edit_bifc.cgi	2016-12-31 05:29:10.000000000 -0500
+@@ -111,6 +111,26 @@
+ 	}
+ print &ui_table_row($text{'bifc_act'}, $upfield);
+ 
++############################################################PROMISC
++
++if ($a->{'fullname'} =~ /^(lo)/)  #dont show promisc option not for lo interface
++{
++
++}
++else
++{
++        $promfield = &ui_radio("promisc", $in{'new'} || $b->{'promisc'} ? 1 : 0,
++                        [ [ 1, "Promisc ON" ], [ 0, "Promisc OFF" ] ]);
++       }
++print &ui_table_row("Promisc Mode", $promfield);
++
++############################################################PROMISC
++
++
++
++
++
++
+ # IP address source. This can either be DHCP, BootP or a fixed IP,
+ # netmask and broadcast
+ $virtual = (!$b && $in{'virtual'}) || ($b && $b->{'virtual'} ne "");
+@@ -308,6 +328,23 @@
+ 		&ui_textbox("bridgewait", $b->{'bridgewait'} ? $b->{'bridgewait'} : "0", 3)." seconds");
+ 	}
+ 
++
++
++####retrieved value of SSID and Passphrase to show at edit time 
++print &ui_table_start( 'Wireless Interface Configuration' );
++
++print &ui_table_row('SSID', ui_textbox("ssid",$b->{'ssid'}), 32);
++
++print &ui_table_row('WPA/WPA2 Passphrase', ui_password("wpa_passphrase", $b->{'wpa_passphrase'}), 40);
++
++
++print &ui_columns_end();
++##########################################
++
++
++
++
++
+ print &ui_table_end();
+      
+ # Generate and show buttons at end of the form
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/linux-lib.pl naveed_module/linux-lib.pl
+--- webmin_1.820/usr/share/webmin/net/linux-lib.pl	2016-10-02 23:34:57.000000000 -0400
++++ naveed_module/linux-lib.pl	2016-12-31 04:51:23.000000000 -0500
+@@ -3,8 +3,12 @@
+ 
+ # active_interfaces([include-no-ipv4-address])
+ # Returns a list of currently ifconfig'd interfaces
++
++###use_ifup_command does not recognise wlan, so it is added===naveed
++
+ sub active_interfaces
+ {
++#print "";
+ local ($empty) = @_;
+ my @rv;
+ my $ethtool = &has_command("ethtool");
+@@ -43,7 +47,10 @@
+ 		if ($l =~ /P-t-P:(\S+)/) { $ifc{'ptp'} = $1; }
+ 		elsif ($l =~ /ptp (\S+)/) { $ifc{'ptp'} = $1; }
+ 		$ifc{'up'}++ if ($l =~ /\sUP\s|<\S*UP\S*>/);
+-		$ifc{'promisc'}++ if ($l =~ /\sPROMISC\s/);
++
++#		$ifc{'promisc'}++ if ($l =~ /\sPROMISC\s/);
++                $ifc{'promisc'}++ if ($l =~ /\sPROMISC\s/);  ##status get from this point .. for active interface
++
+ 
+ 		my (@address6, @netmask6, @scope6);
+ 		while($l =~ s/inet6 addr:\s*(\S+)\/(\d+)\s+Scope:(Global)//i) {
+@@ -223,7 +230,11 @@
+ 		$cmd .= "ifdown $a->{'fullname'}";
+ 		}
+ 	}
+-elsif (&has_command("ifconfig")) {
++
++#elsif (&has_command("ifconfig")) {
++elsif (&has_command("ifconfig")) {                ######comes hre because ifconfig command exist.. 
++
++
+ 	# Build ifconfig command manually
+ 	if($a->{'vlan'} == 1) {
+ 		$cmd .= "ifconfig $a->{'physical'}.$a->{'vlanid'}";
+@@ -238,9 +249,56 @@
+ 	if ($a->{'netmask'}) { $cmd .= " netmask $a->{'netmask'}"; }
+ 	if ($a->{'broadcast'}) { $cmd .= " broadcast $a->{'broadcast'}"; }
+ 	if ($a->{'mtu'} && $a->{'virtual'} eq "") { $cmd .= " mtu $a->{'mtu'}";}
+-	if ($a->{'up'}) { $cmd .= " up"; }
+-	else { $cmd .= " down"; }
++	
++#if ($a->{'up'}) { $cmd .= " up"; }
++#	else { $cmd .= " down"; }
++#	}
++
++#############
++        if ($a->{'up'})
++
++        {
++        $cmd .= " up";
++
++        }
++        else
++        {
++
++         $cmd .= " down";
++
++        }
++
++#####################for promisc 
++        if ($a->{'promisc'}) {
++
++        my @a= `ifconfig -a | grep PROMISC | awk \'{print \$4}\'`;
++        my $length= @a;
++                if($length>=1){
++
++                  &error("<font color=#000fff>Only One Inteface(wired/wireless) can be in Promisc Mode</font>");
++                        }
++                else {
++                $cmd .= " promisc";
++                }
++
++         }
++
++
++
++#####################################################################ELSE for -promisc
++        else{
++         $cmd .= " -promisc";
++
++        }
++
++
++###################################################3
++
++
+ 	}
++
++
++
+ elsif (&has_command("ip")) {
+ 	# If the IP is changing, first remove it then re-add
+ 	my $readd = 0;
+@@ -278,8 +336,42 @@
+ else {
+ 	&error("Both the ifconfig and ip commands are missing");
+ 	}
++
++
+[THIS code is not found in the linux-lib.pl modified file]
++##
++#my $out = &backquote_logged("cd / ; $cmd 2>&1");
++#if ($?) { &error($out); }
++##
++
++##here command is executing and generating error -naveed#
+ my $out = &backquote_logged("cd / ; $cmd 2>&1");
+-if ($?) { &error($out); }
++if ($?) { 
++
++	if ($a->{'promisc'})
++	 {
++
++###Code comes here when promisc is set by user and want to set 0.0.0.0/0.0.0.0 
++
++#		`touch /home/test123/Desktop/promisc_naveed.txt`; 
++		&error("IP address 0.0.0.0 successfully assigned");
++		#&error($out);
++	}
++
++	elsif ( $cmd =~ m /-promisc/ )
++	{
++	    #`touch /home/test123/Desktop/not_promisc_naveed.txt`; 
++	&error("Please set proper IP address");
++
++	}
++	else
++	{
++
++		&error($out);
++
++	}
++ }
++
++########################checks to modify error when ip/mask is 0.0.0.0
+ 
+ # Apply ethernet address
+ if ($a->{'ether'} && !&use_ifup_command($a) && &has_command("ifconfig")) {
+@@ -431,7 +523,10 @@
+ 	$gconfig{'os_version'} >= 5 ||
+ 	$gconfig{'os_type'} eq 'redhat-linux' &&
+ 	$gconfig{'os_version'} >= 13) &&
+-       ($iface->{'name'} !~ /^(eth|em|eno|ens|enp|enx|lo|br)/ ||
++
++#       ($iface->{'name'} !~ /^(eth|em|eno|ens|enp|enx|lo|br)/ ||
++       ($iface->{'name'} !~ /^(eth|wlan|em|eno|ens|enp|enx|lo|br)/ ||
++
+  	$iface->{'name'} =~ /^(\S+)\.(\d+)/) &&
+        $iface->{'virtual'} eq '';
+ }
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/list_ifcs.cgi naveed_module/list_ifcs.cgi
+--- webmin_1.820/usr/share/webmin/net/list_ifcs.cgi	2016-10-02 23:51:55.000000000 -0400
++++ naveed_module/list_ifcs.cgi	2016-12-31 05:29:10.000000000 -0500
+@@ -35,6 +35,11 @@
+ 		   "width=20% valign=top", "width=20% valign=top");
+ 	push(@tds, "width=20% valign=top") if (&supports_address6());
+ 	push(@tds, "width=5% valign=top");
++
++
++##for promisc
++        push(@tds, "width=5% valign=top");
++
+ 	if ($allow_add) {
+ 		push(@links,
+ 		     &ui_link("edit_aifc.cgi?new=1",$text{'ifcs_add'}));
+@@ -47,7 +52,11 @@
+ 				  $text{'ifcs_mask'},
+ 				  &supports_address6() ?
+ 					( $text{'ifcs_ip6'} ) : ( ),
+-				  $text{'ifcs_status'} ], 100, 0, \@tds);
++				 # $text{'ifcs_status'} ], 100, 0, \@tds);
++			          $text{'ifcs_status'},
++                                 "Promisc"], 100, 0, \@tds);
++
++
+ 
+ 	# Show table of interfaces
+ 	@act = sort iface_sort @act;
+@@ -92,6 +101,25 @@
+ 			}
+ 		push(@cols, $a->{'up'} ? $text{'ifcs_up'} :
+ 			"<font color=#ff0000>$text{'ifcs_down'}</font>");
++	
++
++##for promisc
++                if ($a->{'fullname'} =~ /^(lo)/)  #dont show promisc option for lo interface
++                {
++                        push(@cols, $a->{'promisc'} ? "<font color=#000fff>loopback</font>":
++                        "<font color=#ff0000>loopback</font>");
++
++                }
++
++                else
++                {
++                push(@cols, $a->{'promisc'} ? "<font color=#000fff>ON</font>":
++                        "<font color=#ff0000>OFF</font>");
++                }
++###########
++
++
++
+ 		if ($a->{'edit'} && &can_iface($a)) {
+ 			print &ui_checked_columns_row(\@cols, \@tds, "d",
+ 						      $a->{'fullname'});
+@@ -134,13 +162,22 @@
+ 	 "width=20% valign=top", "width=20% valign=top" );
+ push(@tds, "width=20% valign=top xxx") if (&supports_address6());
+ push(@tds, "width=5% valign=top");
++push(@tds, "width=5% valign=top");  ##promisc at boot
++
+ print &ui_columns_start([ "",
+ 			  $text{'ifcs_name'},
+ 			  $text{'ifcs_type'},
+ 			  $text{'ifcs_ip'},
+ 			  $text{'ifcs_mask'},
+ 			  &supports_address6() ? ( $text{'ifcs_ip6'} ) : ( ),
+-			  $text{'ifcs_act'} ], 100, 0, \@tds);
++			 # $text{'ifcs_act'} ], 100, 0, \@tds);
++
++                   #  $text{'ifcs_act'} ], 100, 0, \@tds);
++                          $text{'ifcs_act'},
++#                         $text{'ifcs_status'},
++                         "Promisc"], 100, 0, \@tds);
++
++
+ 
+ @boot = &boot_interfaces();
+ @boot = sort iface_sort @boot;
+@@ -219,6 +256,35 @@
+ 			}
+ 		}
+ 	push(@cols, $a->{'up'} ? $text{'yes'} : $text{'no'});
++
++###for promisc show on list_ifcs.cgi for boot time
++
++                if ($a->{'fullname'} =~ /^(lo)/)  #dont show promisc option for lo interface
++                {
++                        push(@cols, $a->{'promisc'} ? "<font color=#000fff>loopback</font>":
++                        "<font color=#ff0000>loopback</font>");
++
++                }
++
++                else
++                {
++
++#               push(@cols, $a->{'promisc'} ? "1": "0");
++
++
++                push(@cols, $a->{'promisc'} ? "<font color=#000fff>ON</font>":
++                        "<font color=#ff0000>OFF</font>");
++                }
++
++
++
++
++
++
++
++
++
++
+ 	if ($can) {
+ 		print &ui_checked_columns_row(\@cols, \@mytds, "b",
+ 					      $a->{'fullname'});
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/save_aifc.cgi naveed_module/save_aifc.cgi
+--- webmin_1.820/usr/share/webmin/net/save_aifc.cgi	2016-10-02 23:51:55.000000000 -0400
++++ naveed_module/save_aifc.cgi	2016-12-31 05:29:10.000000000 -0500
+@@ -16,7 +16,30 @@
+ 	}
+ else {
+ 	# Validate and save inputs
++
++##naveed
++##Error messages when promisc is enabled or disabled with 0.0.0.0/0.0.0.0 
++
++	if ($in{'promisc'} eq "1")
++	{
++		&error_setup("INFO:- Promisc mode is enabled");
++	}
++
++	elsif ($in{'promisc'} eq "0")
++
++	{
++		&error_setup("INFO:- Promisc mode disabled");
++	
++	}
++
++	else
++	{
++
+ 	&error_setup($text{'aifc_err2'});
++
++	}
++#	&error_setup($text{'aifc_err2'});
++
+ 	if (!$in{'new'}) {
+ 		# Editing existing interface
+ 		$olda = $acts[$in{'idx'}];
+@@ -138,6 +161,14 @@
+ 		$a->{'up'}++;
+ 		}
+ 
++
++     # Save active flag---promisc
++        #if (!$access{'ON'}) {
++                $a->{'promisc'} = $in{'promisc'};
++#               $a->{'promisc'} = $in{'new'} ? 1 : $olda->{'promisc'};
++
++
++
+ 	# Save IPv6 addresses
+ 	if (&supports_address6($a) && $in{'mode6'} eq 'address') {
+ 		# Has IPv6 addresses
+diff --ignore-tab-expansion --ignore-trailing-space --ignore-space-change --ignore-all-space --ignore-blank-lines -ru webmin_1.820/usr/share/webmin/net/save_bifc.cgi naveed_module/save_bifc.cgi
+--- webmin_1.820/usr/share/webmin/net/save_bifc.cgi	2016-10-02 23:51:55.000000000 -0400
++++ naveed_module/save_bifc.cgi	2016-12-31 05:29:10.000000000 -0500
+@@ -32,6 +32,7 @@
+ 	&webmin_log("delete", "bifc", $b->{'fullname'}, $b);
+ 	}
+ else {
++############################################
+ 	# Save or create interface
+ 	&error_setup($text{'bifc_err2'});
+ 	if (!$in{'new'}) {
+@@ -39,6 +40,10 @@
+ 		$oldb = $boot[$in{'idx'}];
+ 		&can_iface($oldb) || &error($text{'ifcs_ecannot_this'});
+ 		$b->{'name'} = $oldb->{'name'};
++
++ [code is changed in the latest verion and this is not required], it is required. 
++                $b->{'promisc'} = $in{'promisc'};  ##promisc old  Instead of old use in value here   
++
+ 		$b->{'file'} = $oldb->{'file'};
+ 		$b->{'gateway'} = $oldb->{'gateway'};
+ 		$b->{'gateway6'} = $oldb->{'gateway6'};
+@@ -97,6 +102,13 @@
+ 		# creating a real interface
+ 		$b->{'name'} = $in{'name'};
+ 		$b->{'fullname'} = $in{'name'};
++
++                # Save boot time---promisc
++        #if (!$access{'ON'}) {
++                $b->{'promisc'} = $in{'promisc'};
++#               $a->{'promisc'} = $in{'new'} ? 1 : $olda->{'promisc'};
++
++
+ 		}
+ 	elsif ($in{'name'} eq 'auto') {
+ 		# creating a vlan interface
+@@ -203,6 +215,47 @@
+ 		$b->{'mtu'} = $in{'mtu_def'} ? undef : $in{'mtu'};
+ 		}
+ 
++
++#################################################checks for SSID and WPA phrase 
++# validate input
++      #  my $ssid_len = length($in{'ssid'});
++      #  if (($ssid_len <= 0) || (32 < $ssid_len)) 
++#       {
++
++#  &error("<font color=#000fff>SSID lenght is not valid</font>");
++
++#        error($text{'ssid_wrong_length'}); 
++#       }
++        #elsif ($in{'ssid'} =~ /[\w ]+/ )
++        #{
++        # error($text{'ssid_bad_characters'});
++        # &error("<font color=#000fff>The SSID you specified had invalid characters.</font>");
++
++        #}
++#       else
++
++#       {
++#                       $changes{'ssid'} = $in{'ssid'};
++                $b->{'ssid'} = $in{'ssid'};
++
++#       }
++
++  #     if ( $in{'wpa_passphrase'} =~ /[\w ]+/ )
++#       {
++                # error($text{'passphrase_bad_characters'});
++#        &error("<font color=#000fff>The passphrase you specified had invalid characters.</font>");
++
++#       }
++#       else
++#       {
++        #        $changes{'wpa_passphrase'} = $in{'wpa_passphrase'};
++                        $b->{'wpa_passphrase'} = $in{'wpa_passphrase'};
++
++#       }
++
++
++
++
+ 	# MAC address
+ 	if (defined($in{'ether'}) && !$in{'ether_def'}) {
+ 		$in{'ether'} =~ /^[A-Fa-f0-9:]+$/ ||
+@@ -324,8 +377,39 @@
+ 		$b->{'fullname'} = $b->{'name'}.
+ 				( $b->{'virtual'} eq '' ? '' : ':'.$b->{'virtual'});
+ 	}
++	
++#ceck for more than 2 promisc interfaces
++
++###########testing
++
++        open (FILE, '/etc/network/interfaces');
++        chomp (@lines = (<FILE>));
++        close(FILE);
++
++        $count = 0;
++        foreach $line (@lines) {
++
++                 if ($line =~ m/ (-promisc)/){##do nothing 
++                        }
++                 elsif ($line =~ m/ (promisc)/){
++                $count++;
++                        }
++
++        }
++        if ($count >=1 && $in{'promisc'} eq "1"){
++
++        #&error("<pre>$err</pre>");
++        &error("<font color=#000fff>Only One Inteface(wired/wireless) can be in Promisc Mode</font>");
++
++        }
++        else{
++        ######################check for more than 2 promisc interfaces
+ 	&save_interface($b);
+ 
++        }
++
++
++
+ 	if ($in{'activate'}) {
+ 		# Make this interface active (if possible)
+ 		&error_setup($text{'bifc_err3'});
+@@ -341,9 +425,22 @@
+ 				    ($gconfig{'os_version'} >= 5)) {}
+ 				else {&load_module($b);}
+ 				}
++	
++        #check for only one interface in promisc 
++        if ($count >=1 && $in{'promisc'} eq "1"){
++
++          &error("<font color=#000fff>Only One Inteface(wired/wireless) can be in Promisc Mode</font>");
++        #  &error("Not allowed two interfaces in Promisc");
++
++        }
++        else{
++
++        ######################check for more than 2 promisc interfaces
++        #&save_interface($b);
+ 			&activate_interface($b);
+ 			}
+ 		}
++	}
+ 	&webmin_log($in{'new'} ? 'create' : 'modify',
+ 		    "bifc", $b->{'fullname'}, $b);
+ 	}
